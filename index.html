@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Middle-Out Photo Editor</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #111;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    padding: 12px 20px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #333;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  h1 {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: #fff;
+    white-space: nowrap;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex: 1;
+  }
+
+  button {
+    padding: 6px 14px;
+    border: 1px solid #444;
+    background: #2a2a2a;
+    color: #ddd;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+  }
+  button:hover { background: #383838; border-color: #666; }
+  button.active { background: #2563eb; border-color: #3b82f6; color: #fff; }
+  button:disabled { opacity: 0.4; cursor: default; }
+
+  .btn-primary {
+    background: #16a34a;
+    border-color: #22c55e;
+    color: #fff;
+  }
+  .btn-primary:hover { background: #15803d; }
+
+  .sep { width: 1px; height: 24px; background: #444; }
+
+  label.file-btn {
+    padding: 6px 14px;
+    border: 1px solid #444;
+    background: #2a2a2a;
+    color: #ddd;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+  label.file-btn:hover { background: #383838; border-color: #666; }
+  input[type=file] { display: none; }
+
+  .size-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: #aaa;
+  }
+  .size-control input[type=range] {
+    width: 90px;
+    accent-color: #3b82f6;
+  }
+  .size-val {
+    min-width: 36px;
+    text-align: right;
+    color: #ddd;
+    font-variant-numeric: tabular-nums;
+  }
+
+  main {
+    flex: 1;
+    display: flex;
+    gap: 0;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .pane-label {
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #666;
+    background: #161616;
+    border-bottom: 1px solid #2a2a2a;
+    user-select: none;
+  }
+
+  .pane-body {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    min-height: 0;
+  }
+
+  .divider {
+    width: 1px;
+    background: #2a2a2a;
+  }
+
+  #editor-wrap {
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+    cursor: crosshair;
+  }
+
+  #source-canvas {
+    display: block;
+    max-width: 100%;
+    max-height: calc(100vh - 120px);
+  }
+
+  /* Cut zone overlay */
+  .cut-overlay {
+    position: absolute;
+    pointer-events: none;
+    top: 0; left: 0; right: 0; bottom: 0;
+  }
+
+  .cut-mask {
+    position: absolute;
+    background: rgba(239,68,68,0.35);
+    border: none;
+    pointer-events: none;
+  }
+
+  .cut-edge {
+    position: absolute;
+    background: #ef4444;
+    pointer-events: all;
+    cursor: row-resize;
+    z-index: 10;
+    transition: background 0.1s;
+  }
+  .cut-edge:hover, .cut-edge.dragging { background: #fca5a5; }
+
+  /* Horizontal mode: edges are horizontal bars */
+  .mode-h .cut-edge {
+    left: 0; right: 0;
+    height: 4px;
+    cursor: row-resize;
+    margin-top: -2px;
+  }
+  /* Vertical mode: edges are vertical bars */
+  .mode-v .cut-edge {
+    top: 0; bottom: 0;
+    width: 4px;
+    cursor: col-resize;
+    margin-left: -2px;
+  }
+
+  .cut-label {
+    position: absolute;
+    background: rgba(239,68,68,0.85);
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    pointer-events: none;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    z-index: 20;
+  }
+
+  #preview-canvas {
+    display: block;
+    max-width: 100%;
+    max-height: calc(100vh - 120px);
+    background: repeating-conic-gradient(#1e1e1e 0% 25%, #2a2a2a 0% 50%) 0 0 / 16px 16px;
+  }
+
+  .drop-zone {
+    width: 360px;
+    height: 260px;
+    border: 2px dashed #444;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: #555;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: #3b82f6;
+    color: #93c5fd;
+  }
+  .drop-zone svg { opacity: 0.5; }
+
+  .info-bar {
+    padding: 4px 12px;
+    font-size: 0.72rem;
+    color: #555;
+    background: #161616;
+    border-top: 1px solid #2a2a2a;
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Middle-Out</h1>
+
+  <div class="controls">
+    <label class="file-btn" title="Open image file">
+      Open Image
+      <input type="file" id="file-input" accept="image/*">
+    </label>
+
+    <div class="sep"></div>
+
+    <button id="btn-h" class="active" title="Remove a horizontal band">&#8212; Horizontal</button>
+    <button id="btn-v" title="Remove a vertical band">&#124; Vertical</button>
+
+    <div class="sep"></div>
+
+    <div class="size-control">
+      <span>Cut&nbsp;size</span>
+      <input type="range" id="cut-size" min="1" max="99" value="25">
+      <span class="size-val" id="cut-size-val">25%</span>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="size-control">
+      <span>Position</span>
+      <input type="range" id="cut-pos" min="1" max="99" value="50">
+      <span class="size-val" id="cut-pos-val">50%</span>
+    </div>
+
+    <div class="sep"></div>
+
+    <button id="btn-download" class="btn-primary" disabled>Download</button>
+  </div>
+</header>
+
+<main>
+  <div class="pane">
+    <div class="pane-label">Source</div>
+    <div class="pane-body" id="source-pane">
+      <div class="drop-zone" id="drop-zone">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+        <span>Drop image here</span>
+        <span style="font-size:0.75rem;color:#444">or click Open Image above &nbsp;·&nbsp; Ctrl+V to paste</span>
+      </div>
+      <div id="editor-wrap" style="display:none">
+        <canvas id="source-canvas"></canvas>
+        <div class="cut-overlay" id="cut-overlay"></div>
+      </div>
+    </div>
+    <div class="info-bar" id="src-info">No image loaded</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="pane">
+    <div class="pane-label">Result</div>
+    <div class="pane-body">
+      <canvas id="preview-canvas"></canvas>
+    </div>
+    <div class="info-bar" id="preview-info"></div>
+  </div>
+</main>
+
+<script>
+(() => {
+  // ── State ──────────────────────────────────────────────────────────────────
+  let img = null;           // HTMLImageElement
+  let mode = 'h';           // 'h' | 'v'
+  let cutCenter = 0.50;     // 0..1 center of cut zone (relative to full dim)
+  let cutSize   = 0.25;     // 0..1 fraction of full dim to remove
+
+  // Derived
+  const cutStart = () => Math.max(0, Math.min(1 - cutSize, cutCenter - cutSize / 2));
+  const cutEnd   = () => Math.min(1, cutStart() + cutSize);
+
+  // ── Element refs ──────────────────────────────────────────────────────────
+  const fileInput    = document.getElementById('file-input');
+  const dropZone     = document.getElementById('drop-zone');
+  const editorWrap   = document.getElementById('editor-wrap');
+  const srcCanvas    = document.getElementById('source-canvas');
+  const previewCanvas= document.getElementById('preview-canvas');
+  const overlay      = document.getElementById('cut-overlay');
+  const btnH         = document.getElementById('btn-h');
+  const btnV         = document.getElementById('btn-v');
+  const cutSizeRange = document.getElementById('cut-size');
+  const cutSizeVal   = document.getElementById('cut-size-val');
+  const cutPosRange  = document.getElementById('cut-pos');
+  const cutPosVal    = document.getElementById('cut-pos-val');
+  const btnDownload  = document.getElementById('btn-download');
+  const srcInfo      = document.getElementById('src-info');
+  const previewInfo  = document.getElementById('preview-info');
+  const srcCtx       = srcCanvas.getContext('2d');
+  const previewCtx   = previewCanvas.getContext('2d');
+
+  // ── Load image ────────────────────────────────────────────────────────────
+  function loadImage(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    const url = URL.createObjectURL(file);
+    const i = new Image();
+    i.onload = () => {
+      img = i;
+      URL.revokeObjectURL(url);
+      srcCanvas.width  = img.naturalWidth;
+      srcCanvas.height = img.naturalHeight;
+      srcCtx.drawImage(img, 0, 0);
+      dropZone.style.display = 'none';
+      editorWrap.style.display = 'inline-block';
+      srcInfo.textContent = `${img.naturalWidth} × ${img.naturalHeight} px`;
+      btnDownload.disabled = false;
+      render();
+    };
+    i.src = url;
+  }
+
+  fileInput.addEventListener('change', e => loadImage(e.target.files[0]));
+
+  // Drag-and-drop on the whole body
+  ['dragenter','dragover'].forEach(ev => {
+    document.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  });
+  ['dragleave','drop'].forEach(ev => {
+    document.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove('drag-over'); });
+  });
+  document.addEventListener('drop', e => {
+    const file = e.dataTransfer.files[0];
+    if (file) loadImage(file);
+  });
+  dropZone.addEventListener('click', () => fileInput.click());
+
+  // Paste
+  document.addEventListener('paste', e => {
+    const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+    if (item) loadImage(item.getAsFile());
+  });
+
+  // ── Mode toggle ───────────────────────────────────────────────────────────
+  btnH.addEventListener('click', () => setMode('h'));
+  btnV.addEventListener('click', () => setMode('v'));
+
+  function setMode(m) {
+    mode = m;
+    btnH.classList.toggle('active', m === 'h');
+    btnV.classList.toggle('active', m === 'v');
+    render();
+  }
+
+  // ── Sliders ───────────────────────────────────────────────────────────────
+  cutSizeRange.addEventListener('input', () => {
+    cutSize = parseInt(cutSizeRange.value) / 100;
+    cutSizeVal.textContent = cutSizeRange.value + '%';
+    // clamp center so zone stays in bounds
+    clampCenter();
+    syncSliders();
+    render();
+  });
+
+  cutPosRange.addEventListener('input', () => {
+    cutCenter = parseInt(cutPosRange.value) / 100;
+    clampCenter();
+    syncSliders();
+    render();
+  });
+
+  function clampCenter() {
+    const half = cutSize / 2;
+    cutCenter = Math.max(half, Math.min(1 - half, cutCenter));
+  }
+
+  function syncSliders() {
+    cutSizeRange.value = Math.round(cutSize * 100);
+    cutSizeVal.textContent = Math.round(cutSize * 100) + '%';
+    cutPosRange.value = Math.round(cutCenter * 100);
+    cutPosVal.textContent = Math.round(cutCenter * 100) + '%';
+  }
+
+  // ── Drag handles on canvas overlay ───────────────────────────────────────
+  let dragging = null; // 'start' | 'end' | 'zone'
+  let dragStartY = 0, dragStartX = 0;
+  let dragStartCenter = 0, dragStartSize = 0;
+
+  overlay.addEventListener('mousedown', e => {
+    if (!img) return;
+    const rect = srcCanvas.getBoundingClientRect();
+    const dim = mode === 'h' ? rect.height : rect.width;
+    const pos = mode === 'h' ? (e.clientY - rect.top) / dim : (e.clientX - rect.left) / dim;
+
+    const s = cutStart(), en = cutEnd();
+    const tol = 8 / dim;
+
+    if (Math.abs(pos - s) < tol) {
+      dragging = 'start';
+    } else if (Math.abs(pos - en) < tol) {
+      dragging = 'end';
+    } else if (pos > s && pos < en) {
+      dragging = 'zone';
+    } else {
+      return;
+    }
+    dragStartY = e.clientY;
+    dragStartX = e.clientX;
+    dragStartCenter = cutCenter;
+    dragStartSize   = cutSize;
+    e.preventDefault();
+    overlay.querySelectorAll('.cut-edge').forEach(el => el.classList.add('dragging'));
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!dragging || !img) return;
+    const rect = srcCanvas.getBoundingClientRect();
+    const dim = mode === 'h' ? rect.height : rect.width;
+    const delta = mode === 'h'
+      ? (e.clientY - dragStartY) / dim
+      : (e.clientX - dragStartX) / dim;
+
+    if (dragging === 'start') {
+      // moving start edge: adjust size and re-center
+      const newStart = Math.max(0, Math.min(dragStartCenter - dragStartSize / 2 + delta, dragStartCenter + dragStartSize / 2 - 1 / dim));
+      const newEnd = dragStartCenter + dragStartSize / 2;
+      cutSize   = Math.max(1 / dim, newEnd - newStart);
+      cutCenter = newStart + cutSize / 2;
+    } else if (dragging === 'end') {
+      const newStart = dragStartCenter - dragStartSize / 2;
+      const newEnd = Math.min(1, Math.max(newStart + 1 / dim, dragStartCenter + dragStartSize / 2 + delta));
+      cutSize   = Math.max(1 / dim, newEnd - newStart);
+      cutCenter = newStart + cutSize / 2;
+    } else { // zone
+      cutCenter = Math.max(dragStartSize / 2, Math.min(1 - dragStartSize / 2, dragStartCenter + delta));
+    }
+    clampCenter();
+    syncSliders();
+    render();
+  });
+
+  window.addEventListener('mouseup', () => {
+    dragging = null;
+    overlay.querySelectorAll('.cut-edge').forEach(el => el.classList.remove('dragging'));
+  });
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  function render() {
+    renderOverlay();
+    renderPreview();
+  }
+
+  function renderOverlay() {
+    overlay.innerHTML = '';
+    if (!img) return;
+
+    overlay.className = 'cut-overlay mode-' + mode;
+
+    const rect = srcCanvas.getBoundingClientRect();
+    const s = cutStart(), en = cutEnd();
+
+    const mask = document.createElement('div');
+    mask.className = 'cut-mask';
+
+    const edgeA = document.createElement('div');
+    edgeA.className = 'cut-edge';
+
+    const edgeB = document.createElement('div');
+    edgeB.className = 'cut-edge';
+
+    const lbl = document.createElement('div');
+    lbl.className = 'cut-label';
+
+    if (mode === 'h') {
+      mask.style.top    = (s * 100) + '%';
+      mask.style.height = ((en - s) * 100) + '%';
+      mask.style.left   = '0'; mask.style.right = '0';
+
+      edgeA.style.top = (s * 100) + '%';
+      edgeB.style.top = (en * 100) + '%';
+
+      const px = Math.round((en - s) * img.naturalHeight);
+      lbl.textContent = `−${px}px`;
+      lbl.style.top  = (((s + en) / 2) * 100) + '%';
+      lbl.style.left = '50%';
+      lbl.style.transform = 'translate(-50%,-50%)';
+    } else {
+      mask.style.left  = (s * 100) + '%';
+      mask.style.width = ((en - s) * 100) + '%';
+      mask.style.top   = '0'; mask.style.bottom = '0';
+
+      edgeA.style.left = (s * 100) + '%';
+      edgeB.style.left = (en * 100) + '%';
+
+      const px = Math.round((en - s) * img.naturalWidth);
+      lbl.textContent = `−${px}px`;
+      lbl.style.left = (((s + en) / 2) * 100) + '%';
+      lbl.style.top  = '50%';
+      lbl.style.transform = 'translate(-50%,-50%)';
+    }
+
+    overlay.append(mask, edgeA, edgeB, lbl);
+  }
+
+  function renderPreview() {
+    if (!img) return;
+
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+    const s  = cutStart();
+    const en = cutEnd();
+
+    if (mode === 'h') {
+      const topH    = Math.round(s  * ih);
+      const bottomY = Math.round(en * ih);
+      const bottomH = ih - bottomY;
+      const outH    = topH + bottomH;
+
+      previewCanvas.width  = iw;
+      previewCanvas.height = outH;
+      previewCtx.drawImage(img, 0, 0,      iw, topH,    0,    0, iw, topH);
+      previewCtx.drawImage(img, 0, bottomY, iw, bottomH, 0, topH, iw, bottomH);
+
+      previewInfo.textContent = `${iw} × ${outH} px  (removed ${Math.round((en-s)*ih)} rows)`;
+    } else {
+      const leftW  = Math.round(s  * iw);
+      const rightX = Math.round(en * iw);
+      const rightW = iw - rightX;
+      const outW   = leftW + rightW;
+
+      previewCanvas.width  = outW;
+      previewCanvas.height = ih;
+      previewCtx.drawImage(img, 0,      0, leftW,  ih, 0,     0, leftW,  ih);
+      previewCtx.drawImage(img, rightX, 0, rightW, ih, leftW, 0, rightW, ih);
+
+      previewInfo.textContent = `${outW} × ${ih} px  (removed ${Math.round((en-s)*iw)} cols)`;
+    }
+  }
+
+  // ── Download ───────────────────────────────────────────────────────────────
+  btnDownload.addEventListener('click', () => {
+    if (!img) return;
+    previewCanvas.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'middleout.png';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }, 'image/png');
+  });
+})();
+</script>
+</body>
+</html>
