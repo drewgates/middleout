@@ -261,6 +261,12 @@
 
     <div class="sep"></div>
 
+    <button id="btn-align-start" title="Anchor cut to start edge — resize grows/shrinks from end">&#8701; Start</button>
+    <button id="btn-align-center" class="active" title="Cut expands symmetrically from center">Center</button>
+    <button id="btn-align-end" title="Anchor cut to end edge — resize grows/shrinks from start">End &#8702;</button>
+
+    <div class="sep"></div>
+
     <div class="size-control">
       <span>Cut&nbsp;size</span>
       <input type="range" id="cut-size" min="1" max="99" value="25">
@@ -320,6 +326,7 @@
   let mode = 'h';           // 'h' | 'v'
   let cutCenter = 0.50;     // 0..1 center of cut zone (relative to full dim)
   let cutSize   = 0.25;     // 0..1 fraction of full dim to remove
+  let cutAlign  = 'center'; // 'start' | 'center' | 'end'
 
   // Derived
   const cutStart = () => Math.max(0, Math.min(1 - cutSize, cutCenter - cutSize / 2));
@@ -338,6 +345,9 @@
   const cutSizeVal   = document.getElementById('cut-size-val');
   const cutPosRange  = document.getElementById('cut-pos');
   const cutPosVal    = document.getElementById('cut-pos-val');
+  const btnAlignStart  = document.getElementById('btn-align-start');
+  const btnAlignCenter = document.getElementById('btn-align-center');
+  const btnAlignEnd    = document.getElementById('btn-align-end');
   const btnDownload  = document.getElementById('btn-download');
   const srcInfo      = document.getElementById('src-info');
   const previewInfo  = document.getElementById('preview-info');
@@ -396,11 +406,29 @@
     render();
   }
 
+  // ── Alignment toggle ──────────────────────────────────────────────────────
+  btnAlignStart.addEventListener('click',  () => setAlign('start'));
+  btnAlignCenter.addEventListener('click', () => setAlign('center'));
+  btnAlignEnd.addEventListener('click',    () => setAlign('end'));
+
+  function setAlign(a) {
+    cutAlign = a;
+    btnAlignStart.classList.toggle('active',  a === 'start');
+    btnAlignCenter.classList.toggle('active', a === 'center');
+    btnAlignEnd.classList.toggle('active',    a === 'end');
+  }
+
   // ── Sliders ───────────────────────────────────────────────────────────────
   cutSizeRange.addEventListener('input', () => {
+    const oldStart = cutStart();
+    const oldEnd   = cutEnd();
     cutSize = parseInt(cutSizeRange.value) / 100;
     cutSizeVal.textContent = cutSizeRange.value + '%';
-    // clamp center so zone stays in bounds
+    if (cutAlign === 'start') {
+      cutCenter = oldStart + cutSize / 2;
+    } else if (cutAlign === 'end') {
+      cutCenter = oldEnd - cutSize / 2;
+    }
     clampCenter();
     syncSliders();
     render();
